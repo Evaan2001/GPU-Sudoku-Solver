@@ -1,6 +1,6 @@
 <p align="center">
 <img src="https://github.com/Evaan2001/GPU-Sudoku-Solver/assets/82547698/da367d87-3376-4228-8d82-6d2f91bfc3e9" 
- width = "600"/>
+ width = "900"/>
 </p>
 
 <h3 align="center">
