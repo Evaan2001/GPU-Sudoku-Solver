@@ -7,3 +7,8 @@ CUDA is Nvidia's parallel computing platform. To run cuda files, you'll need two
 
 
 <span style="color: blue">some blue text</span>
+
+<p style="text-align: center;">We'll solve sudoku boards – a lot them!
+</p> 
+
+<h3 style="text-align: center;">H3 that is center aligned</h3>
