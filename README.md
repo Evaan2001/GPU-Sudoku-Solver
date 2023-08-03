@@ -27,7 +27,7 @@ An Overview Of The Problem-Solving Logic
 </h2>
 
 <p  align="center">
-Let's talk about **what on earth is constraint propagation**! Here's what I lazily copied from ChatGPT. 😌
+Let's talk about **what on earth is constraint propagation** ! 
 </p>
 
 <p  align="center">
