@@ -26,9 +26,8 @@ CUDA is a programming model developed by Nvidia for general computing on GPUs. T
 An Overview Of The Problem-Solving Logic
 </h2>
 
-<p  align="center">
-Let's discuss ** what on earth constraint propagation is **! 
-</p>
+<align="center">
+Let's discuss **what on earth constraint propagation is**! 
 
 <p  align="center">
 In Sudoku, each number 1-9 must appear exactly once in each row, column, and designated 3x3 block. If you can determine the value of a particular cell, then you can eliminate that value as a possibility from all other cells in the same row, column, and 3x3 block.
