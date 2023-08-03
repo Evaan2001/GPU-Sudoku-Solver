@@ -60,7 +60,8 @@ __global__ void solver_kernel(board_t *boards)
   // create another variable to hold a potentially new cell value
   uint16_t new_cell = current_cell;
 
-  int predicate;                              // predicate for __sync_threads_count(); gets incremented if the new_cell value is different from the original value and so tells a block to run the threads again
+  int predicate;                              /* predicate for __sync_threads_count(); gets incremented if the new_cell value is different 
+                                                 from the original value and so tells a block to run the threads again */
   int val = 0;                                // stores the value held in a cell
   int i = 0, j = 0, block_x = 0, block_y = 0; // loop control variables
   do
