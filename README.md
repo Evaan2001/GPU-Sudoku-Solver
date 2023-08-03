@@ -27,7 +27,7 @@ An Overview Of The Problem-Solving Logic
 </h2>
 
 <p  align="center">
-Let's talk about **what on earth is constraint propagation** ! 
+Let's discuss ** what on earth constraint propagation is **! 
 </p>
 
 <p  align="center">
