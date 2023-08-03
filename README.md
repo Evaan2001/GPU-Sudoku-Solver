@@ -26,15 +26,16 @@ CUDA is a programming model developed by Nvidia for general computing on GPUs. T
 An Overview Of The Problem-Solving Logic
 </h2>
 
-<align="center">
-Let's discuss **what on earth constraint propagation is**! 
-
+<p  align="center">
+Let's discuss what on earth constraint propagation is! 
+</p>
+ 
 <p  align="center">
 In Sudoku, each number 1-9 must appear exactly once in each row, column, and designated 3x3 block. If you can determine the value of a particular cell, then you can eliminate that value as a possibility from all other cells in the same row, column, and 3x3 block.
 </p>
 
 <p  align="center">
-This elimination process can reveal new clues that further reduce the possibilities in other cells. By **repeatedly applying these constraints**, you may solve some cells entirely and make others easier to figure out. Constraint propagation can be an efficient way to make progress in solving a Sudoku puzzle by **systematically considering the implications of the known numbers**.
+This elimination process can reveal new clues that further reduce the possibilities in other cells. By repeatedly applying these constraints, you may solve some cells entirely and make others easier to figure out. Constraint propagation can be an efficient way to make progress in solving a Sudoku puzzle by systematically considering the implications of the known numbers.
 </p>
 
 <h2 align="center"> 
