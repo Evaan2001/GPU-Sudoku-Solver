@@ -79,7 +79,8 @@ __global__ void solver_kernel(board_t *boards)
         val = cell_to_digit(boards[blockIdx.x].cells[9 * x + i]);
         if (val != 0)
         {
-          /* using idempotence (look at the description of cell encoding in the documentation for digit_to_cell) to narrow down the possible values for the cell */
+          /* using idempotence (look at the description of cell encoding in the documentation for digit_to_cell) to 
+             narrow down the possible values for the cell */
           new_cell = new_cell & ~(1 << val);
         }
       }
