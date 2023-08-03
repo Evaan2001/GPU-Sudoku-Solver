@@ -1,450 +1,89 @@
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <pthread.h>
+<p  align="center">
+<img  src="https://github.com/Evaan2001/GPU-Sudoku-Solver/assets/82547698/da367d87-3376-4228-8d82-6d2f91bfc3e9"
+width = "900"/>
 
-#include "util.h"
+</p>
+<h3 align="center">
+We'll solve a lot of sudoku boards – and solve them pretty darn quickly! 
+</h3>
 
-// The width and height of a sudoku board
-#define BOARD_DIM 9
+<p align="center">
+Here's a highly parallelized program in CUDA (Nvidia's parallel computing platform) that was able to solve 1,750,000 sudoku boards/sec by applying constraint propagation on a GPU (Graphical Processing Units).
+</p>
 
-// The width and heigh of a square group in a sudoku board
-#define GROUP_DIM 3
+<h2 align="center"> 
+What Do We Need?
+</h2>
+ 
+<p  align="center">
+CUDA is a programming model developed by Nvidia for general computing on GPUs. To run cuda files, you'll need two things –
+</p>
 
-// The number of boards to pass to the solver at one time
-#define BATCH_SIZE (128 * 200)
+1) The nvcc compiler, which stands for **Nv**idia **C**uda **C**ompiler
+2) A Nvidia graphics card (I used the Nvidia Quadro K1200 GPU which sells for about $100)
 
-/**
- * A board is an array of 81 cells. Each cell is encoded as a 16-bit integer.
- * Read about this encoding in the documentation for the digit_to_cell and
- * cell_to_digit functions' documentation.
- *
- * Boards are stored as a one-dimensional array. It doesn't matter if you use
- * row-major or column-major form (that just corresponds to a rotation of the
- * sudoku board) but you will need to convert column and row to a single index
- * when accessing the board to propagate constraints.
- */
-typedef struct board
-{
-  uint16_t cells[BOARD_DIM * BOARD_DIM];
-} board_t;
+<h2 align="center"> 
+An Overview Of The Problem Solving Logic
+</h2>
 
-// Declare a few functions. Documentation is with the function definition.
-void print_board(board_t *board);
-__host__ __device__ uint16_t digit_to_cell(int digit);
-__host__ __device__ int cell_to_digit(uint16_t cell);
+<p  align="center">
+Let's talk about **what on earth is constraint propogation**! Here's what I lazily copied from ChatGPT. 😌
+</p>
 
-/**
- * The function solve_boards calls this GPU kernel to parallely solve sudoku boards. Each block
- * corresponds to a board and has 9*9 threads (each thread corresponds to one cell on a board).
- * This kernel only implements constraint propagation as a way to solve the boards. As a result,
- * not all boards are guaranteed to be solved.
- *
- * \param boards      An array of boards to be solved.
- */
+<p  align="center">
+In Sudoku, each number 1-9 must appear exactly once in each row, column, and designated 3x3 block. If you can determine the value of a particular cell, then you can eliminate that value as a possibility from all other cells in the same row, column, and 3x3 block.
+</p>
 
-__global__ void solver_kernel(board_t *boards)
-{
+<p  align="center">
+This elimination process can reveal new clues that further reduce the possibilities in other cells. By **repeatedly applying these constraints**, you may solve some cells entirely and make others easier to figure out. Constraint propagation can be an efficient way to make progress in solving a Sudoku puzzle by **systematically considering the implications of the known numbers**.
+</p>
 
-  // Get the x,y coordinate of a cell from thread data
-  int x = threadIdx.x;
-  int y = threadIdx.y;
+<h2 align="center"> 
+Any Limitations?
+</h2>
 
-  // calculate the index that the cell will be located inside a board's cells array
-  size_t index = (9 * threadIdx.x) + threadIdx.y;
-  // get the current cell value, i.e., range of possibile numbers that could go in that cell
-  uint16_t current_cell = boards[blockIdx.x].cells[index];
-  // create another variable to hold a potentially new cell value
-  uint16_t new_cell = current_cell;
+<p  align="center">
+Yes, there is one important thing. Constraint propogation can be super efficiently implemented on a GPU kernel. However, this logic doesn't guarantee solving all sudoku boards. It can certainly solve quite a few sudoku puzzles but fails against some of the more tricky ones. I tested my program on 5 different data sets of varying sizes and here are the results:
 
-  int predicate;                              // predicate for __sync_threads_count(); gets incremented if the new_cell value is different from the original value and so tells a block to run the threads again
-  int val = 0;                                // stores the value held in a cell
-  int i = 0, j = 0, block_x = 0, block_y = 0; // loop control variables
-  do
-  {
-    predicate = 0;
+1.  100/100 for the tiny set
+2.  1000/1000 for the small set
+3.  9997/10000 for the medium set
+4.  99959/100000 for the large set <- this is still a 99.96% solving rate (I'm happy with this!) and just takes 0.057 seconds in total (now I'm really happy 😂)!
+</p>
 
-    if (cell_to_digit(new_cell) == 0)
-    { // if we are working with a blank cell
+<h2 align="center"> 
+Programming Implemention
+</h2>
+ 
+1. We'll represent a board as an array of 81 cells.
+2. Each cell is encoded as a 16-bit integer. Bits 1-9 of the integer indicate whether the values 1, 2, ..., 8, or 9 could appear in the given cell. For example, if bit 3 is set to 1, then the cell may hold a three. Cells that have multiple possible values will have multiple bits set to 1. So if a cell can have 1,3, 8, or 9, we'll encode it as `0000 0011 0000 1010` (Note that the rightmost bit is the 0th bit, so we ignore it as we are only concerned with bits 1-9).
+3. We are gonna associate a 9*9 block of threads with each sudoku board; this means that we will have 1 thread for each cell of the board. 
+4. Each thread will begin by getting the current cell value (the 16-bit integer). If only 1 bit of the value is set to 1, that means the cell is already solved for and no more work needs to be done for that cell. If however multiple bits are on, this means that we need to find a number for that cell. So we will first scan through the relevant row, column, and 3*3 cell block to see if we can reduce the number of possibilites or, ideally, solve the cell. If we do reduce the number of possiblities or solve the cell, we will update the cell value and call the kernel to run again for all of the threads. The idea is that if a particular cell has fewer possibilities, this information may be useful for other cells, so we want to run calculations for all cells again. If no cell is updated, that either means the board is solved or it is not solvable via constraint propogation; either way, we quit the program. 
+5. A note on scanning for possibilities. We optimize this process by using the logical 'and' operator `&` and **idempotence**. This refers to the property of some operations that can be applied multiple times without changing the result beyond the initial application. For example, adding zero to a number will never change the result, regardless of how many times you do it. In our case, let's say a cell A can have either 1,2, or 3. It's encoded as `A = 0000 0000 0000 1110`. Now suppose we see that another cell in that row, say B, has a value of 3. So B is encoded as `B = 0000 0000 0000 1000`. Clearly, A cannot have a value of 3 and we need to update this information. We can update this information by executing `A = A & ~B`. Basically, A can only have values that B can't, so invert the bits of B and bitwise AND them with the bits of A. For example, `A = A & ~B` = `A = A & ~(0000 0000 0000 1000)` = `A = A & (1111 1111 1111 0111)` = `A = (0000 0000 0000 1110) & (1111 1111 1111 0111)` = `A = 0000 0000 0000 0110`. As we see, we just updated A's value to only encode the possibilities of 1 and 2 (3 is gone). The idempotence property lies in the fact that we can repeat this process for newer values without changing the results of previous operations; even when the cell is solved for, we can still run this operation without changing anything – much liking adding 0 to a number.
+6. In my code, I use the function `cell_to_digit` to help with the implementing of  idempotence logic. It takes in an encoded cell and returns which bit is active for that cell; it will return 0 if multiple bits are active. So `cell_to_digit(A)` will return `0` and `cell_to_digit(B)` will return `3`.  This ensures that the cell we will be using to eliminate possiblities has indeed been solved and is not just a sum of possible values. I use this function as follows: `A = A & ~(1 << cell_to_digit(B))`.  This means we have `A = A & ~(1 << cell_to_digit(B))` = `A = A & ~(1 << 3)` = `A = A & ~(1000)`. Note that we 1000 is the same as  0000 0000 0000 1000. And with this, we can proceed the way we did in step 5.
+7. The provided code reads a set of sudoku from an input file and passes them on to be solved. The code will read  `BATCH_SIZE`  sudoku boards at once, then invoke the  `solve_boards`  function. Note: I've found that setting `BATCH_SIZE = 128 * 200` produces the fastest results but do feel free to experiment.
 
-      // go through the relevant row
-      for (i = 0; i < 9; i++)
-      { // i here shuffles through the different columns in a row
-        if (i == y)
-          continue;
-        val = cell_to_digit(boards[blockIdx.x].cells[9 * x + i]);
-        if (val != 0)
-        {
-          /* using idempotence (look at the description of cell encoding in the documentation for digit_to_cell) to narrow down the possible values for the cell */
-          new_cell = new_cell & ~(1 << val);
-        }
-      }
+<h2 align="center"> 
+Files
+</h2>
+ 
+<p  align="center">
+Here's what you'll find –
+</p>
 
-      // go through the relevant column
-      for (i = 0; i < 9; i++)
-      { // i here shuffles through the different rows in a column
-        if (i == x)
-          continue;
-        val = cell_to_digit(boards[blockIdx.x].cells[9 * i + y]);
-        if (val != 0)
-        {
-          // same usage of idempotence as in the case of going through the relevant row
-          new_cell = new_cell & ~(1 << val);
-        }
-      }
+1. *input* – a directory/folder that has 4 csv files. Each file has sudoku boards where a blank cells is represented by 0. The tiny file has 100 boards, small has 1000, medium has 10,000, and large has 100,000 boards.
+2. *Makefile* – This compiles the program and preprares a file that you can run from the terminal.
+3. *sudoku.cu* – The CUDA file that has all of the main code
+4. *util.h* – A utilities file that helps with time calculations to measure performance.
 
-      // Find out the x,y coordinates of the top-left corner of the relevant block
-      block_x = x - x % 3;
-      block_y = y - y % 3;
+<h2 align="center"> 
+How To Run This
+</h2>
 
-      // Search the block
-      for (i = block_x; i < block_x + 3; i++)
-      {
-        for (j = block_y; j < block_y + 3; j++)
-        {
-          if (i == x && j == y)
-            continue;
-          val = cell_to_digit(boards[blockIdx.x].cells[9 * i + j]);
-          if (val != 0)
-          {
-            // same usage of idempotence as in the case of going through the relevant row/column
-            new_cell = new_cell & ~(1 << val);
-          }
-        }
-      }
 
-      if (boards[blockIdx.x].cells[index] != new_cell)
-        // if we have a new value for the cell (this happens if another thread solved the value for its cell in a previous run
-        predicate++; // increment the predicate as a non-zero predicate signals a block to run again
-
-      boards[blockIdx.x].cells[index] = new_cell; // update the current cell value
-    }
-  } while (__syncthreads_count(predicate) != 0); // run the loop while any thread reports making progress
-}
-
-/**
- * Take an array of boards and solve them all. The number of boards will be no
- * more than BATCH_SIZE, but may be less if the total number of input boards
- * is not evenly-divisible by BATCH_SIZE.
- *
- * \param boards      An array of boards that should be solved.
- * \param num_boards  The numebr of boards in the boards array
- */
-void solve_boards(board_t *boards, size_t num_boards)
-{
-
-  dim3 threads(9, 9); // to configure the layout of threads in a block
-
-  board_t *gpu_boards; // to store the GPU's copy of the boards to solve
-
-  // malloc space for gpu_boards
-  if (cudaMalloc(&gpu_boards, sizeof(board_t) * num_boards) != cudaSuccess)
-  {
-    fprintf(stderr, "Failed to allocate space for %d boards\n", num_boards);
-    exit(2);
-  }
-
-  // copy over the boards from the CPU to GPU
-  if (cudaMemcpy(gpu_boards, boards, sizeof(board_t) * num_boards, cudaMemcpyHostToDevice) != cudaSuccess)
-  {
-    fprintf(stderr, "Failed to copy boards to the GPU\n");
-  }
-
-  // Call the kernel
-  solver_kernel<<<num_boards, threads>>>(gpu_boards);
-
-  // Wait for the threads to finish
-  if (cudaDeviceSynchronize() != cudaSuccess)
-  {
-    fprintf(stderr, "CUDA Error: %s\n", cudaGetErrorString(cudaPeekAtLastError()));
-  }
-
-  // Copy the solved boards from the GPU back to the CPU
-  if (cudaMemcpy(boards, gpu_boards, sizeof(board_t) * num_boards, cudaMemcpyDeviceToHost) != cudaSuccess)
-  {
-    fprintf(stderr, "Failed to copy solved boards from the GPU\n");
-  }
-
-  // Free memory malloced for GPU
-  cudaFree(gpu_boards);
-}
-
-/**
- * Take as input an integer value 0-9 (inclusive) and convert it to the encoded
- * cell form used for solving the sudoku. This encoding uses bits 1-9 to
- * indicate which values may appear in this cell.
- *
- * For example, if bit 3 is set to 1, then the cell may hold a three. Cells that
- * have multiple possible values will have multiple bits set.
- *
- * The input digit 0 is treated specially. This value indicates a blank cell,
- * where any value from one to nine is possible.
- *
- * \param digit   An integer value 0-9 inclusive
- * \returns       The encoded form of digit using bits to indicate which values
- *                may appear in this cell.
- */
-__host__ __device__ uint16_t digit_to_cell(int digit)
-{
-  if (digit == 0)
-  {
-    // A zero indicates a blank cell. Numbers 1-9 are possible, so set bits 1-9.
-    return 0x3FE;
-  }
-  else
-  {
-    // Otherwise we have a fixed value. Set the corresponding bit in the board.
-    return 1 << digit;
-  }
-}
-
-/*
- * Convert an encoded cell back to its digit form. A cell with two or more
- * possible values will be encoded as a zero. Cells with one possible value
- * will be converted to that value.
- *
- * For example, if the provided cell has only bit three set, this function will
- * return the value 3.
- *
- * \param cell  An encoded cell that uses bits to indicate which values could
- *              appear at this point in the board.
- * \returns     The value that must appear in the cell if there is only one
- *              possibility, or zero otherwise.
- */
-__host__ __device__ int cell_to_digit(uint16_t cell)
-{
-// Get the index of the least-significant bit in this cell's value
-#if defined(__CUDA_ARCH__)
-  int msb = __clz(cell);
-  int lsb = sizeof(unsigned int) * 8 - msb - 1;
-#else
-  int lsb = __builtin_ctz(cell);
-#endif
-
-  // Is there only one possible value for this cell? If so, return it.
-  // Otherwise return zero.
-  if (cell == 1 << lsb)
-    return lsb;
-  else
-    return 0;
-}
-
-/**
- * Read in a sudoku board from a string. Boards are represented as an array of
- * 81 16-bit integers. Each integer corresponds to a cell in the board. Bits
- * 1-9 of the integer indicate whether the values 1, 2, ..., 8, or 9 could
- * appear in the given cell. A zero in the input indicates a blank cell, where
- * any value could appear.
- *
- * \param output  The location where the board will be written
- * \param str     The input string that encodes the board
- * \returns       true if parsing succeeds, false otherwise
- */
-bool read_board(board_t *output, const char *str)
-{
-  for (int index = 0; index < BOARD_DIM * BOARD_DIM; index++)
-  {
-    if (str[index] < '0' || str[index] > '9')
-      return false;
-
-    // Convert the character value to an equivalent integer
-    int value = str[index] - '0';
-
-    // Set the value in the board
-    output->cells[index] = digit_to_cell(value);
-  }
-
-  return true;
-}
-
-/**
- * Print a sudoku board. Any cell with a single possible value is printed. All
- * cells with two or more possible values are printed as blanks.
- *
- * \param board   The sudoku board to print
- */
-void print_board(board_t *board)
-{
-  for (int row = 0; row < BOARD_DIM; row++)
-  {
-    // Print horizontal dividers
-    if (row != 0 && row % GROUP_DIM == 0)
-    {
-      for (int col = 0; col < BOARD_DIM * 2 + BOARD_DIM / GROUP_DIM; col++)
-      {
-        printf("-");
-      }
-      printf("\n");
-    }
-
-    for (int col = 0; col < BOARD_DIM; col++)
-    {
-      // Print vertical dividers
-      if (col != 0 && col % GROUP_DIM == 0)
-        printf("| ");
-
-      // Compute the index of this cell in the board array
-      int index = col + row * BOARD_DIM;
-
-      // Get the index of the least-significant bit in this cell's value
-      int digit = cell_to_digit(board->cells[index]);
-
-      // Print the digit if it's not a zero. Otherwise print a blank.
-      if (digit != 0)
-        printf("%d ", digit);
-      else
-        printf("  ");
-    }
-    printf("\n");
-  }
-  printf("\n");
-}
-
-/**
- * Check through a batch of boards to see how many were solved correctly.
- *
- * \param boards        An array of (hopefully) solved boards
- * \param solutions     An array of solution boards
- * \param num_boards    The number of boards and solutions
- * \param solved_count  Output: A pointer to the count of solved boards.
- * \param error:count   Output: A pointer to the count of incorrect boards.
- */
-void check_solutions(board_t *boards,
-                     board_t *solutions,
-                     size_t num_boards,
-                     size_t *solved_count,
-                     size_t *error_count)
-{
-  // Loop over all the boards in this batch
-  for (int i = 0; i < num_boards; i++)
-  {
-    // Does the board match the solution?
-    if (memcmp(&boards[i], &solutions[i], sizeof(board_t)) == 0)
-    {
-      // Yes. Record a solved board
-      (*solved_count)++;
-    }
-    else
-    {
-      // No. Make sure the board doesn't have any constraints that rule out
-      // values that are supposed to appear in the solution.
-      bool valid = true;
-      for (int j = 0; j < BOARD_DIM * BOARD_DIM; j++)
-      {
-        if ((boards[i].cells[j] & solutions[i].cells[j]) == 0)
-        {
-          valid = false;
-        }
-      }
-
-      // If the board contains an incorrect constraint, record an error
-      if (!valid)
-        (*error_count)++;
-    }
-  }
-}
-
-/**
- * Entry point for the program
- */
-int main(int argc, char **argv)
-{
-  // Check arguments
-  if (argc != 2)
-  {
-    fprintf(stderr, "Usage: %s <input file name>\n", argv[0]);
-    exit(1);
-  }
-
-  // Try to open the input file
-  FILE *input = fopen(argv[1], "r");
-  if (input == NULL)
-  {
-    fprintf(stderr, "Failed to open input file %s.\n", argv[1]);
-    perror(NULL);
-    exit(2);
-  }
-
-  // Keep track of total boards, boards solved, and incorrect outputs
-  size_t board_count = 0;
-  size_t solved_count = 0;
-  size_t error_count = 0;
-
-  // Keep track of time spent solving
-  size_t solving_time = 0;
-
-  // Reserve space for a batch of boards and solutions
-  board_t boards[BATCH_SIZE];
-  board_t solutions[BATCH_SIZE];
-
-  // Keep track of how many boards we've read in this batch
-  size_t batch_count = 0;
-
-  // Read the input file line-by-line
-  char *line = NULL;
-  size_t line_capacity = 0;
-  while (getline(&line, &line_capacity, input) > 0)
-  {
-    // Read in the starting board
-    if (!read_board(&boards[batch_count], line))
-    {
-      fprintf(stderr, "Skipping invalid board...\n");
-      continue;
-    }
-
-    // Read in the solution board
-    if (!read_board(&solutions[batch_count], line + BOARD_DIM * BOARD_DIM + 1))
-    {
-      fprintf(stderr, "Skipping invalid board...\n");
-      continue;
-    }
-
-    // Move to the next index in the batch
-    batch_count++;
-
-    // Also increment the total count of boards
-    board_count++;
-
-    // If we finished a batch, run the solver
-    if (batch_count == BATCH_SIZE)
-    {
-      size_t start_time = time_ms();
-      solve_boards(boards, batch_count);
-      solving_time += time_ms() - start_time;
-
-      check_solutions(boards, solutions, batch_count, &solved_count, &error_count);
-
-      // Reset the batch count
-      batch_count = 0;
-    }
-  }
-
-  // Check if there's an incomplete batch to solve
-  if (batch_count > 0)
-  {
-    size_t start_time = time_ms();
-    solve_boards(boards, batch_count);
-    solving_time += time_ms() - start_time;
-
-    check_solutions(boards, solutions, batch_count, &solved_count, &error_count);
-  }
-
-  // Print stats
-  double seconds = (double)solving_time / 1000;
-  double solving_rate = (double)solved_count / seconds;
-
-  // Don't print nan when solver is not implemented
-  if (seconds < 0.01)
-    solving_rate = 0;
-
-  printf("Boards: %lu\n", board_count);
-  printf("Boards Solved: %lu\n", solved_count);
-  printf("Errors: %lu\n", error_count);
-  printf("Total Solving Time: %lums\n", solving_time);
-  printf("Solving Rate: %.2f sudoku/second\n", solving_rate);
-
-  return 0;
-}
+1. To run the program, first download *sudoku.cu*, *util.h*, *Makefile*, and the *inputs* sub-directory/sub-folder from my repository and store them in one directory/folder. So if you name your folder "sudoku-solver", it should have *sudoku.cu*, *util.h*, *Makefile*, and the *inputs* folder. If you open *input*, you'll see the 4 individual input csv files. Also note that depending on your browser, the *Makefile* might get downloaded as a text file, so you'll have *Makefile.txt*. If so, remove the *txt* extension as Makefiles don't have any extensions.
+2. Now install nvcc (the compiler for CUDA) if you don't have it already. A common practice is to download the entire CUDA toolkit that you can find [here](https://developer.nvidia.com/cuda-downloads).
+3. Once you have that set up, open a terminal window and navigate your way to the directory containing the files you downloaded. 
+4. Now just type `make all`. This will create a new exectuble file named *sudoku*.
+5. Now all that's left is running the executable wiht the input file. If you want to run this code on the tiny input set, you'll have to type `./sudoku inputs/tiny.csv` in the terminal. Analogously, `./sudoku inputs/small.csv` runs the program on the small input set, `./sudoku inputs/medium.csv` runs the program on the medium input set, and `./sudoku inputs/large.csv` runs the program on the large input set, 
+6. Wait for the magic to happen. 🙂
