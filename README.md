@@ -1,5 +1,5 @@
 <p  align="center">
-<img  src="https://github.com/Evaan2001/GPU-Sudoku-Solver/assets/82547698/da367d87-3376-4228-8d82-6d2f91bfc3e9"
+<img  src="https://github.com/Evaan2001/Images_For_ReadMe/blob/main/Sudoku_Solver.png"
 width = "900"/>
 
 </p>
